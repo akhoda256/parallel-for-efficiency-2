@@ -68,10 +68,9 @@ void convertRGBtoYCbCr_original (Image *in, Image *out)
 {
     int width = in->width;
     int height = in->height;
-
-    for (int y = 0; y < width; y++)
+    for (int x = 0; x < height; x++)
     {
-        for (int x = 0; x < height; x++)
+        for (int y = 0; y < width; y++)
         {
 
             float R = in->rc->data[x * width + y];
@@ -97,49 +96,44 @@ void convertRGBtoYCbCr_original (Image *in, Image *out)
 void convertRGBtoYCbCr(Image *in, Image *out) {
     int width = in->width;
     int height = in->height;
-    int size = width * height;
 
-    float *rin = in->rc->data;
-    float *gin = in->gc->data;
-    float *bin = in->bc->data;
-    float *rout = out->rc->data;
-    float *gout = out->rc->data;
-    float *bout = out->rc->data;
+    // Define constants for RGB to YCbCr conversion
+    const float Kr = 0.299f;
+    const float Kg = 0.587f;
+    const float Kb = 0.113f;
+    const float YOffset = 0.0f;
+    const float CbOffset = 128.0f;
+    const float CrOffset = 128.0f;
 
-    // Allocate memory on the GPU using OpenMP target directive
-#pragma omp target map(to: rin[0:size], bin[0:size], gin[0:size]) \
-                       map(from: rout[0:size], bout[0:size], gout[0:size])
-    {
-        // Parallelize the computation on the GPU
-#pragma omp parallel for collapse(2)
-        for (int x = 0; x < height; x += 16) {
-            for (int y = 0; y < width; y += 16) {
-                // Process a 16x16 block of data on the GPU
-                for (int i = x; i < x + 16; i++) {
-                    for (int j = y; j < y + 16; j++) {
-                        if (i < height && j < width) {
-                            float R = rin[i * width + j];
-                            float G = gin[i * width + j];
-                            float B = bin[i * width + j];
-                            float Y = 0 + ((float)0.299 * R) + ((float)0.587 * G)
-                                      + ((float)0.113 * B);
-                            float Cb = 128 - ((float)0.168736 * R) - ((float)0.331264 * G)
-                                       + ((float)0.5 * B);
-                            float Cr = 128 + ((float)0.5 * R) - ((float)0.418688 * G)
-                                       - ((float)0.081312 * B);
-                            rout[i * width + j] = Y;
-                            gout[i * width + j] = Cb;
-                            bout[i * width + j] = Cr;
-                        }
-                    }
-                }
-            }
+    // Allocate variables for the input and output data
+    float *inR = in->rc->data;
+    float *inG = in->gc->data;
+    float *inB = in->bc->data;
+    float *outY = out->rc->data;
+    float *outCb = out->gc->data;
+    float *outCr = out->bc->data;
+
+    int teamNum = height/16*16;
+#pragma omp target teams distribute parallel for simd collapse(2) map(to: inR[0:width*height], inG[0:width*height], inB[0:width*height]) map(tofrom: outY[0:width*height], outCb[0:width*height], outCr[0:width*height]) //num_teams(256*256)
+    for (int x = 0; x < height; x++) {
+        for (int y = 0; y < width; y++) {
+            // Get RGB values from input image
+            float R = inR[x * width + y];
+            float G = inG[x * width + y];
+            float B = inB[x * width + y];
+
+            // Perform RGB to YCbCr conversion
+            float Y = YOffset + (Kr * R) + (Kg * G) + (Kb * B);
+            float Cb = CbOffset - (0.168736f * R) - (0.331264f * G) + (0.5f * B);
+            float Cr = CrOffset + (0.5f * R) - (0.418688f * G) - (0.081312f * B);
+
+            // Store the YCbCr values in the output image
+            outY[x * width + y] = Y;
+            outCb[x * width + y] = Cb;
+            outCr[x * width + y] = Cr;
         }
-    } // End of the target region
-
-    // Data transfer and memory management are handled automatically by OpenMP
+    }
 }
-
 
 Channel *
 lowPass (Channel *in, Channel *out)

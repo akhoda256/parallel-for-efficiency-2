@@ -17,24 +17,43 @@
 
 using namespace std;
 
-__global__ void convertRGBtoYCbCrKernel(float *inputR, float *inputG, float *inputB, float *outputY,
-                                        float *outputCb, float *outputCr, int width, int height) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+//__global__ void convertRGBtoYCbCrKernel(float *inputR, float *inputG, float *inputB, float *outputY,
+//                                        float *outputCb, float *outputCr, int width, int height) {
+//    int x = blockIdx.x * blockDim.x + threadIdx.x;
+//    int y = blockIdx.y * blockDim.y + threadIdx.y;
+//
+//    if (x < width && y < height) {
+//        int index = x * width + y;
+//        float R = inputR[index];
+//        float G = inputG[index];
+//        float B = inputB[index];
+//
+//        float Y = 0 + 0.299f * R + 0.587f * G + 0.113f * B;
+//        float Cb = 128 - 0.168736f * R - 0.331264f * G + 0.5f * B;
+//        float Cr = 128 + 0.5f * R - 0.418688f * G - 0.081312f * B;
+//
+//        outputY[index] = Y;
+//        outputCb[index] = Cb;
+//        outputCr[index] = Cr;
+//    }
+//}
 
-    if (x < width && y < height) {
-        int index = x * width + y;
-        float R = inputR[index];
-        float G = inputG[index];
-        float B = inputB[index];
+__global__ void convertRGBtoYCbCrKernel(float *inputR, float *inputG, float *inputB, float *outputY,
+                                        float *outputCb, float *outputCr, int size, int offset) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x + offset;
+
+    if (idx < size) {
+        float R = inputR[idx];
+        float G = inputG[idx];
+        float B = inputB[idx];
 
         float Y = 0 + 0.299f * R + 0.587f * G + 0.113f * B;
         float Cb = 128 - 0.168736f * R - 0.331264f * G + 0.5f * B;
         float Cr = 128 + 0.5f * R - 0.418688f * G - 0.081312f * B;
 
-        outputY[index] = Y;
-        outputCb[index] = Cb;
-        outputCr[index] = Cr;
+        outputY[idx] = Y;
+        outputCb[idx] = Cb;
+        outputCr[idx] = Cr;
     }
 }
 
@@ -115,55 +134,119 @@ convertRGBtoYCbCr_original (Image *in, Image *out)
 
     // return out;
 }
+
 void
 convertRGBtoYCbCr (Image *in, Image *out)
 {
     int width = in->width;
     int height = in->height;
-
+    int size = width * height;
+    int sizeByte = width * height * sizeof(float);
     // Allocate device memory for input and output data
     float *d_inputR, *d_inputG, *d_inputB, *d_outputY, *d_outputCb, *d_outputCr;
-    cudaMalloc((void**)&d_inputR, width * height * sizeof(float));
-    cudaMalloc((void**)&d_inputG, width * height * sizeof(float));
-    cudaMalloc((void**)&d_inputB, width * height * sizeof(float));
-    cudaMalloc((void**)&d_outputY, width * height * sizeof(float));
-    cudaMalloc((void**)&d_outputCb, width * height * sizeof(float));
-    cudaMalloc((void**)&d_outputCr, width * height * sizeof(float));
-    cudaEvent_t start, end;
-    cudaEventCreate(&start);
-    cudaEventCreate(&end);
+    float *h_inputR, *h_inputG, *h_inputB, *h_outputY, *h_outputCb, *h_outputCr;
+    cudaMalloc((void**)&d_inputR, sizeByte);
+    cudaMalloc((void**)&d_inputG, sizeByte);
+    cudaMalloc((void**)&d_inputB, sizeByte);
 
-    cudaEventRecord(start);
-    // Copy input data from host to device
-    cudaMemcpy(d_inputR, in->rc->data, width * height * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_inputG, in->gc->data, width * height * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_inputB, in->bc->data, width * height * sizeof(float), cudaMemcpyHostToDevice);
-    cudaEventRecord(end);
-    cudaEventSynchronize(end);
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, end);
-    printf("setup time: %f us\n", 1000*milliseconds);
-    // Define grid and block dimensions
-    dim3 blockSize(16, 16);
-    dim3 gridSize(width/blockSize.x , height/blockSize.y ); // Adjust block size as needed
+    cudaHostAlloc((void**)&h_inputR, sizeByte, cudaHostAllocDefault);
+    cudaHostAlloc((void**)&h_inputG, sizeByte, cudaHostAllocDefault);
+    cudaHostAlloc((void**)&h_inputB, sizeByte, cudaHostAllocDefault);
+
+    memcpy(h_inputR , in->rc->data, sizeByte);
+    memcpy(h_inputG , in->gc->data, sizeByte);
+    memcpy(h_inputB , in->bc->data, sizeByte);
+
+    cudaMalloc((void**)&d_outputY, sizeByte);
+    cudaMalloc((void**)&d_outputCb, sizeByte);
+    cudaMalloc((void**)&d_outputCr, sizeByte);
+
+    cudaHostAlloc((void**)&h_outputY, sizeByte, cudaHostAllocDefault);
+    cudaHostAlloc((void**)&h_outputCb, sizeByte, cudaHostAllocDefault);
+    cudaHostAlloc((void**)&h_outputCr, sizeByte, cudaHostAllocDefault);
+
+//    cudaEvent_t start, end;
+//    cudaEventCreate(&start);
+//    cudaEventCreate(&end);
+//
+//    cudaEventRecord(start);
+
+    // Create CUDA stream for asynchronous operations
+    int numStreams = 16;
+    cudaStream_t streams[numStreams];
+    for (int i = 0; i < numStreams; i++) {
+        cudaStreamCreate(&streams[i]);
+    }
+
+    // Use the streams for asynchronous operations
 
 
-    // Launch the CUDA kernel
-    convertRGBtoYCbCrKernel<<<gridSize, blockSize>>>(d_inputR, d_inputG, d_inputB, d_outputY, d_outputCb, d_outputCr, width, height);
 
-    cudaError_t cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        // Additional error handling here, such as cleaning up resources
+// Start asynchronous memory copies
+    dim3 blockSize(128);
+    dim3 gridSize(size / (blockSize.x * numStreams)); // Adjust block sizeByte as needed
+    for (int i = 0; i < numStreams; i++) {
+        int offset = i * size/numStreams;
+        cudaMemcpyAsync(&d_inputR[offset], &h_inputR[offset], sizeByte / numStreams, cudaMemcpyHostToDevice, streams[i]);
+        cudaError_t cudaStatus = cudaGetLastError();
+        if (cudaStatus != cudaSuccess) {
+            fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+            // Additional error handling here, such as cleaning up resources
+        }
+        cudaMemcpyAsync(&d_inputG[offset], &h_inputG[offset], sizeByte / numStreams, cudaMemcpyHostToDevice, streams[i]);
+        cudaMemcpyAsync(&d_inputB[offset], &h_inputB[offset], sizeByte / numStreams, cudaMemcpyHostToDevice, streams[i]);
+
+        convertRGBtoYCbCrKernel<<<gridSize, blockSize, 0, streams[i]>>>(d_inputR, d_inputG, d_inputB, d_outputY, d_outputCb, d_outputCr, size, offset);
+
+        cudaMemcpyAsync(&h_outputY[offset], &d_outputY[offset], sizeByte / numStreams, cudaMemcpyDeviceToHost, streams[i]);
+        cudaMemcpyAsync(&h_outputCb[offset], &d_outputCb[offset], sizeByte / numStreams, cudaMemcpyDeviceToHost, streams[i]);
+        cudaMemcpyAsync(&h_outputCr[offset], &d_outputCr[offset], sizeByte / numStreams, cudaMemcpyDeviceToHost, streams[i]);
     }
 
 
+    // Copy input data from host to device
+//    cudaMemcpy(d_inputR, in->rc->data, width * height * sizeof(float), cudaMemcpyHostToDevice);
+//    cudaMemcpy(d_inputG, in->gc->data, width * height * sizeof(float), cudaMemcpyHostToDevice);
+//    cudaMemcpy(d_inputB, in->bc->data, width * height * sizeof(float), cudaMemcpyHostToDevice);
+//    cudaEventRecord(end);
+//    cudaEventSynchronize(end);
+//    float milliseconds = 0;
+//    cudaEventElapsedTime(&milliseconds, start, end);
+//    printf("setup time: %f us\n", 1000*milliseconds);
+    // Define grid and block dimensions
+
+
+
+    // Launch the CUDA kernel
+
+
+
+
     // Copy the results back from device to host
-    cudaMemcpy(out->rc->data, d_outputY, width * height * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(out->gc->data, d_outputCb, width * height * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(out->bc->data, d_outputCr, width * height * sizeof(float), cudaMemcpyDeviceToHost);
+//    cudaMemcpy(out->rc->data, d_outputY, width * height * sizeof(float), cudaMemcpyDeviceToHost);
+//   cudaMemcpy(out->gc->data, d_outputCb, width * height * sizeof(float), cudaMemcpyDeviceToHost);
+//    cudaMemcpy(out->bc->data, d_outputCr, width * height * sizeof(float), cudaMemcpyDeviceToHost);
+    for (int i = 0; i < numStreams; i++) {
+        cudaStreamSynchronize(streams[i]);
+        cudaStreamDestroy(streams[i]);
+    }
+
+
+    memcpy(out->rc->data, h_outputY, sizeByte);
+    memcpy(out->gc->data, h_outputCb, sizeByte);
+    memcpy(out->bc->data, h_outputCr, sizeByte);
+// Synchronize the stream to ensure all operations are completed
+
+    // Destroy the streams when done
 
     // Free device memory
+    cudaFreeHost(h_inputR);
+    cudaFreeHost(h_inputB);
+    cudaFreeHost(h_inputG);
+    cudaFreeHost(h_outputY);
+    cudaFreeHost(h_outputCr);
+    cudaFreeHost(h_outputCb);
+
     cudaFree(d_inputR);
     cudaFree(d_inputG);
     cudaFree(d_inputB);
@@ -172,9 +255,9 @@ convertRGBtoYCbCr (Image *in, Image *out)
     cudaFree(d_outputCr);
 
 
-    cudaEventDestroy(start);
-    cudaEventDestroy(end);
-  // return out;
+//    cudaEventDestroy(start);
+//    cudaEventDestroy(end);
+    // return out;
 }
 
 Channel *
