@@ -14,6 +14,8 @@
 #include <vector>
 #include <cuda_runtime.h>
 #include <unistd.h>
+#include <omp.h>
+#include <immintrin.h>
 
 using namespace std;
 
@@ -223,6 +225,31 @@ void freeGpu(){
 }
 
 
+void memcpy_avx2(void* dest, const void* src, size_t size) {
+    // Ensure size is a multiple of 32 (256 bits)
+    size_t aligned_size = size & ~0x1F;
+
+    // Cast the source and destination pointers to the appropriate type
+    __m256i* dest_ptr = (__m256i*)dest;
+    const __m256i* src_ptr = (const __m256i*)src;
+
+    // Copy data in 256-bit (32-byte) chunks
+    for (size_t i = 0; i < aligned_size / 32; i++) {
+        __m256i data = _mm256_loadu_si256(src_ptr + i);  // Load 256 bits from src
+        _mm256_storeu_si256(dest_ptr + i, data);         // Store 256 bits to dest
+    }
+
+    // Copy any remaining bytes (less than 32 bytes)
+    size_t remaining_size = size - aligned_size;
+    if (remaining_size > 0) {
+        char* dest_tail = (char*)dest + aligned_size;
+        const char* src_tail = (const char*)src + aligned_size;
+        for (size_t i = 0; i < remaining_size; i++) {
+            dest_tail[i] = src_tail[i];
+        }
+    }
+}
+
 void
 convertRGBtoYCbCr (Image *in, Image *out)
 {
@@ -231,21 +258,43 @@ convertRGBtoYCbCr (Image *in, Image *out)
     int size = width * height;
     int sizeByte = width * height * sizeof(float);
     // Allocate device memory for input and output data
-
+    struct timeval starttime, endtime;
     //initGPU(width, height);
+    gettimeofday (&starttime, NULL);
+    int numChunks = 32;
+    #pragma omp parallel for num_threads(4)
+    for(int i = 0; i <  numChunks; i++){
+        int offset = i*(size/numChunks);
+        //cout<<omp_get_thread_num()<<endl;
+        memcpy(&h_inputR[offset] , &(in->rc->data[offset]), sizeByte/numChunks);
+//        memcpy(&h_inputG[offset] , &(in->gc->data[offset]), sizeByte/numChunks);
+//        memcpy(&h_inputB[offset] , &(in->bc->data[offset]), sizeByte/numChunks);
+    }
+    #pragma omp parallel for num_threads(4)
+    for(int i = 0; i <  numChunks; i++){
+        int offset = i*(size/numChunks);
+        memcpy(&h_inputG[offset] , &(in->gc->data[offset]), sizeByte/numChunks);
+    }
+    #pragma omp parallel for num_threads(4)
+    for(int i = 0; i <  numChunks; i++){
+        int offset = i*(size/numChunks);
+        //cout<<omp_get_thread_num()<<endl;
+        memcpy(&h_inputB[offset] , &(in->bc->data[offset]), sizeByte/numChunks);
+    }
 
-    memcpy(h_inputR , in->rc->data, sizeByte);
-    memcpy(h_inputG , in->gc->data, sizeByte);
-    memcpy(h_inputB , in->bc->data, sizeByte);
-
-
+    gettimeofday (&endtime, NULL);
+    double diff = double (endtime.tv_sec) * 1000.0f
+                 + double (endtime.tv_usec) / 1000.0f
+                 - double (starttime.tv_sec) * 1000.0f
+                 - double (starttime.tv_usec) / 1000.0f; // in ms
+                 cout<<"val = "<<diff<<endl;
 
 //    cudaEvent_t start, end;
 //    cudaEventCreate(&start);
 //    cudaEventCreate(&end);
 //
 //    cudaEventRecord(start);
-
+    gettimeofday(&starttime, NULL);
     // Create CUDA stream for asynchronous operations
     int numStreams = 16;
     cudaStream_t streams[numStreams];
@@ -313,10 +362,39 @@ convertRGBtoYCbCr (Image *in, Image *out)
         cudaStreamDestroy(streams[i]);
     }
 
+    gettimeofday (&endtime, NULL);
+    diff = double (endtime.tv_sec) * 1000.0f
+                  + double (endtime.tv_usec) / 1000.0f
+                  - double (starttime.tv_sec) * 1000.0f
+                  - double (starttime.tv_usec) / 1000.0f; // in ms
+    cout<<"val = "<<diff<<endl;
+    numChunks = 16;
+    gettimeofday(&starttime, NULL);
+    #pragma omp parallel for num_threads(8)
+    for(int i = numChunks-1; i >  -1; i--) {
+        int offset = i*(size/numChunks);
+        memcpy(&out->bc->data[offset], &h_outputCr[offset], sizeByte/numChunks);
+    }
 
-    memcpy(out->rc->data, h_outputY, sizeByte);
-    memcpy(out->gc->data, h_outputCb, sizeByte);
-    memcpy(out->bc->data, h_outputCr, sizeByte);
+    #pragma omp parallel for num_threads(8)
+    for(int i = 0; i <  numChunks; i++) {
+        int offset = i*(size/numChunks);
+        memcpy(&out->rc->data[offset], &h_outputY[offset], sizeByte/numChunks);
+//        memcpy(&out->gc->data[offset], &h_outputCb[offset], sizeByte/numChunks);
+//        memcpy(&out->bc->data[offset], &h_outputCr[offset], sizeByte/numChunks);
+    }
+    #pragma omp parallel for num_threads(8)
+    for(int i = 0; i <  numChunks; i++) {
+        int offset = i*(size/numChunks);
+        memcpy(&out->gc->data[offset], &h_outputCb[offset], sizeByte/numChunks);
+    }
+
+    gettimeofday (&endtime, NULL);
+    diff = double (endtime.tv_sec) * 1000.0f
+                  + double (endtime.tv_usec) / 1000.0f
+                  - double (starttime.tv_sec) * 1000.0f
+                  - double (starttime.tv_usec) / 1000.0f; // in ms
+    cout<<"val = "<<diff<<endl;
 // Synchronize the stream to ensure all operations are completed
 
     // Destroy the streams when done

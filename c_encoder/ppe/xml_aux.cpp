@@ -429,7 +429,7 @@ closeStats (void)
   for (int i = 0; i < 10; i++)
     {
       total += runtime_accum[i];
-      file << setw (30) << left << function_name[i] << std::setprecision (0)
+      file << setw (30) << left << function_name[i] << std::setprecision (5)
            << runtime_accum[i] << "ms" << std::endl;
     }
   file << std::endl;
