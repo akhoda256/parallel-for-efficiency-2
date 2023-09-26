@@ -331,7 +331,7 @@ convertRGBtoYCbCr (Image *in, Image *out)
 
 
 // Start asynchronous memory copies
-    dim3 blockSize(16);
+    dim3 blockSize(128);
     dim3 gridSize(size / (blockSize.x * numStreams)); // Adjust block sizeByte as needed
     for (int i = 0; i < numStreams; i++) {
         int offset = i * size/numStreams;
