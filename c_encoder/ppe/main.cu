@@ -188,7 +188,11 @@ convertRGBtoYCbCr_original (Image *in, Image *out)
 }
 
 void initGPU(int width, int height){
-    int sizeByte = width * height * sizeof(float);
+    int size = width * height;
+    int sizeByte = size * sizeof(float);
+    struct timeval starttime, endtime;
+    //initGPU(width, height);
+    gettimeofday (&starttime, NULL);
     cudaMalloc((void**)&d_inputR, sizeByte);
     cudaMalloc((void**)&d_inputG, sizeByte);
     cudaMalloc((void**)&d_inputB, sizeByte);
@@ -205,10 +209,24 @@ void initGPU(int width, int height){
     cudaHostAlloc((void**)&h_outputCb, sizeByte, cudaHostAllocDefault);
     cudaHostAlloc((void**)&h_outputCr, sizeByte, cudaHostAllocDefault);
 
+//    dim3 blockSize(16);
+//    dim3 gridSize(1); // Adjust block sizeByte as needed
+//    convertRGBtoYCbCrKernel1<<<gridSize, blockSize>>>(d_inputR, d_inputG, d_inputB, d_outputY, d_outputCb, d_outputCr, size, 0);
+//    convertRGBtoYCbCrKernel2<<<gridSize, blockSize>>>(d_inputR, d_inputG, d_inputB, d_outputY, d_outputCb, d_outputCr, size, 0);
+//    convertRGBtoYCbCrKernel3<<<gridSize, blockSize>>>(d_inputR, d_inputG, d_inputB, d_outputY, d_outputCb, d_outputCr, size, 0);
+    gettimeofday (&endtime, NULL);
+    double diff = double (endtime.tv_sec) * 1000.0f
+           + double (endtime.tv_usec) / 1000.0f
+           - double (starttime.tv_sec) * 1000.0f
+           - double (starttime.tv_usec) / 1000.0f; // in ms
+    cout<<"initGpu = "<<diff<<endl;
 }
 
 
 void freeGpu(){
+    struct timeval starttime, endtime;
+    //initGPU(width, height);
+    gettimeofday (&starttime, NULL);
     cudaFreeHost(h_inputR);
     cudaFreeHost(h_inputB);
     cudaFreeHost(h_inputG);
@@ -222,6 +240,12 @@ void freeGpu(){
     cudaFree(d_outputY);
     cudaFree(d_outputCb);
     cudaFree(d_outputCr);
+    gettimeofday (&endtime, NULL);
+    double diff = double (endtime.tv_sec) * 1000.0f
+                  + double (endtime.tv_usec) / 1000.0f
+                  - double (starttime.tv_sec) * 1000.0f
+                  - double (starttime.tv_usec) / 1000.0f; // in ms
+    cout<<"freeGPU = "<<diff<<endl;
 }
 
 
@@ -258,9 +282,9 @@ convertRGBtoYCbCr (Image *in, Image *out)
     int size = width * height;
     int sizeByte = width * height * sizeof(float);
     // Allocate device memory for input and output data
-    struct timeval starttime, endtime;
-    //initGPU(width, height);
-    gettimeofday (&starttime, NULL);
+//    struct timeval starttime, endtime;
+//    //initGPU(width, height);
+//    gettimeofday (&starttime, NULL);
     int numChunks = 32;
     #pragma omp parallel for num_threads(4)
     for(int i = 0; i <  numChunks; i++){
@@ -282,19 +306,19 @@ convertRGBtoYCbCr (Image *in, Image *out)
         memcpy(&h_inputB[offset] , &(in->bc->data[offset]), sizeByte/numChunks);
     }
 
-    gettimeofday (&endtime, NULL);
-    double diff = double (endtime.tv_sec) * 1000.0f
-                 + double (endtime.tv_usec) / 1000.0f
-                 - double (starttime.tv_sec) * 1000.0f
-                 - double (starttime.tv_usec) / 1000.0f; // in ms
-                 cout<<"val = "<<diff<<endl;
+//    gettimeofday (&endtime, NULL);
+//    double diff = double (endtime.tv_sec) * 1000.0f
+//                 + double (endtime.tv_usec) / 1000.0f
+//                 - double (starttime.tv_sec) * 1000.0f
+//                 - double (starttime.tv_usec) / 1000.0f; // in ms
+//                 cout<<"val = "<<diff<<endl;
 
 //    cudaEvent_t start, end;
 //    cudaEventCreate(&start);
 //    cudaEventCreate(&end);
 //
 //    cudaEventRecord(start);
-    gettimeofday(&starttime, NULL);
+//    gettimeofday(&starttime, NULL);
     // Create CUDA stream for asynchronous operations
     int numStreams = 16;
     cudaStream_t streams[numStreams];
@@ -307,7 +331,7 @@ convertRGBtoYCbCr (Image *in, Image *out)
 
 
 // Start asynchronous memory copies
-    dim3 blockSize(128);
+    dim3 blockSize(16);
     dim3 gridSize(size / (blockSize.x * numStreams)); // Adjust block sizeByte as needed
     for (int i = 0; i < numStreams; i++) {
         int offset = i * size/numStreams;
@@ -362,14 +386,14 @@ convertRGBtoYCbCr (Image *in, Image *out)
         cudaStreamDestroy(streams[i]);
     }
 
-    gettimeofday (&endtime, NULL);
-    diff = double (endtime.tv_sec) * 1000.0f
-                  + double (endtime.tv_usec) / 1000.0f
-                  - double (starttime.tv_sec) * 1000.0f
-                  - double (starttime.tv_usec) / 1000.0f; // in ms
-    cout<<"val = "<<diff<<endl;
+//    gettimeofday (&endtime, NULL);
+//    diff = double (endtime.tv_sec) * 1000.0f
+//                  + double (endtime.tv_usec) / 1000.0f
+//                  - double (starttime.tv_sec) * 1000.0f
+//                  - double (starttime.tv_usec) / 1000.0f; // in ms
+//    cout<<"val = "<<diff<<endl;
     numChunks = 16;
-    gettimeofday(&starttime, NULL);
+//    gettimeofday(&starttime, NULL);
     #pragma omp parallel for num_threads(8)
     for(int i = numChunks-1; i >  -1; i--) {
         int offset = i*(size/numChunks);
@@ -389,12 +413,12 @@ convertRGBtoYCbCr (Image *in, Image *out)
         memcpy(&out->gc->data[offset], &h_outputCb[offset], sizeByte/numChunks);
     }
 
-    gettimeofday (&endtime, NULL);
-    diff = double (endtime.tv_sec) * 1000.0f
-                  + double (endtime.tv_usec) / 1000.0f
-                  - double (starttime.tv_sec) * 1000.0f
-                  - double (starttime.tv_usec) / 1000.0f; // in ms
-    cout<<"val = "<<diff<<endl;
+//    gettimeofday (&endtime, NULL);
+//    diff = double (endtime.tv_sec) * 1000.0f
+//                  + double (endtime.tv_usec) / 1000.0f
+//                  - double (starttime.tv_sec) * 1000.0f
+//                  - double (starttime.tv_usec) / 1000.0f; // in ms
+//    cout<<"val = "<<diff<<endl;
 // Synchronize the stream to ensure all operations are completed
 
     // Destroy the streams when done
