@@ -43,22 +43,22 @@ float *h_inputR, *h_inputG, *h_inputB, *h_outputY, *h_outputCb, *h_outputCr;
 //    }
 //}
 
-__global__ void convertRGBtoYCbCrKernel(float *inputR, float *inputG, float *inputB, float *outputY,
-                                        float *outputCb, float *outputCr, int size, int offset) {
+__global__ void convertRGBtoYCbCrKernel(float *inputR1, float *inputG1, float *inputB1, float *outputY1,
+                                        float *outputCb1, float *outputCr1, int size, int offset) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x + offset;
 
     if (idx < size) {
-        float R = inputR[idx];
-        float G = inputG[idx];
-        float B = inputB[idx];
+        float R = inputR1[idx];
+        float G = inputG1[idx];
+        float B = inputB1[idx];
 
         float Y = 0 + 0.299f * R + 0.587f * G + 0.113f * B;
         float Cb = 128 - 0.168736f * R - 0.331264f * G + 0.5f * B;
         float Cr = 128 + 0.5f * R - 0.418688f * G - 0.081312f * B;
 
-        outputY[idx] = Y;
-        outputCb[idx] = Cb;
-        outputCr[idx] = Cr;
+        outputY1[idx] = Y;
+        outputCb1[idx] = Cb;
+        outputCr1[idx] = Cr;
     }
 }
 
@@ -273,6 +273,78 @@ void memcpy_avx2(void* dest, const void* src, size_t size) {
         }
     }
 }
+
+void
+convertRGBtoYCbCr1 (Image *in, Image *out){
+    int width = in->width;
+    int height = in->height;
+    int size = width * height;
+    int sizeByte = width * height * sizeof(float);
+
+    float *d_inputR1, *d_inputG1, *d_inputB1, *d_outputY1, *d_outputCb1, *d_outputCr1;
+
+
+    cudaMalloc((void**)&d_inputR1, sizeByte);
+    cudaMalloc((void**)&d_inputG1, sizeByte);
+    cudaMalloc((void**)&d_inputB1, sizeByte);
+    cudaMalloc((void**)&d_outputY1, sizeByte);
+    cudaMalloc((void**)&d_outputCb1, sizeByte);
+    cudaMalloc((void**)&d_outputCr1, sizeByte);
+
+    cudaMemcpy(d_inputR1, in->rc->data, width * height * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_inputG1, in->gc->data, width * height * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_inputB1, in->bc->data, width * height * sizeof(float), cudaMemcpyHostToDevice);
+
+
+    dim3 blockSize(128);
+    dim3 gridSize(size / blockSize.x); // Adjust block sizeByte as needed
+    convertRGBtoYCbCrKernel<<<gridSize, blockSize>>>(d_inputR1, d_inputG1, d_inputB1, d_outputY1, d_outputCb1, d_outputCr1, size, 0);
+
+    cudaMemcpy(out->rc->data, d_outputY1, width * height * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(out->gc->data, d_outputCb1, width * height * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(out->bc->data, d_outputCr1, width * height * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_inputR1);
+    cudaFree(d_inputG1);
+    cudaFree(d_inputB1);
+    cudaFree(d_outputY1);
+    cudaFree(d_outputCb1);
+    cudaFree(d_outputCr1);
+
+}
+
+void
+convertRGBtoYCbCr2 (Image *in, Image *out){
+    int width = in->width;
+    int height = in->height;
+    int size = width * height;
+    int sizeByte = width * height * sizeof(float);
+
+
+    memcpy(h_inputR, in->rc->data, sizeByte);
+    memcpy(h_inputG, in->gc->data, sizeByte);
+    memcpy(h_inputB, in->bc->data, sizeByte);
+
+    cudaMemcpy(d_inputR, h_inputB, width * height * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_inputG, h_inputG, width * height * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_inputB, h_inputB, width * height * sizeof(float), cudaMemcpyHostToDevice);
+
+
+    dim3 blockSize(128);
+    dim3 gridSize(size / blockSize.x); // Adjust block sizeByte as needed
+    convertRGBtoYCbCrKernel<<<gridSize, blockSize>>>(d_inputR, d_inputG, d_inputB, d_outputY, d_outputCb, d_outputCr, size, 0);
+
+    cudaMemcpy(h_outputY, d_outputY, width * height * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_outputCb, d_outputCb, width * height * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_outputCr, d_outputCr, width * height * sizeof(float), cudaMemcpyDeviceToHost);
+
+
+    memcpy(out->rc->data, h_outputY, sizeByte);
+    memcpy(out->gc->data, h_outputCb, sizeByte);
+    memcpy(out->bc->data, h_outputCr, sizeByte);
+
+}
+
 
 void
 convertRGBtoYCbCr (Image *in, Image *out)
@@ -890,7 +962,7 @@ encode ()
   stream = create_xml_stream (width, height, QUALITY, WINDOW_SIZE, BLOCK_SIZE);
   vector<mVector> *motion_vectors = NULL;
 
-    initGPU(width, height);
+    initGPU(width, height); //main loop initGPU
   for (int frame_number = 0; frame_number < end_frame; frame_number++)
     {
       frame_rgb = NULL;

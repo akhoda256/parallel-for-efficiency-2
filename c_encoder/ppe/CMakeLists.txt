@@ -30,7 +30,7 @@ add_executable(ppe ${CPP_SOURCES} ${CUDA_SOURCES})
 # Set CUDA architecture (adjust based on your target GPU)
 set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -arch=sm_35)
 
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -O3)
+#set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -O3)
 
 # Link CUDA libraries
 target_link_libraries(ppe xml2 tiff cudart OpenMP::OpenMP_CXX tcmalloc)
